@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2026 ReviewToolkits
+Copyright (c) 2026 Bhuvansh Kataria (BHUVANSH855)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,3 +19,11 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+The MIT license disclaims warranty in the legal sense.
+
+The social contract — between this tool's user and the CPython security team
+whose work you are reviewing — is governed by WORKING_WITH_MAINTAINERS.md,
+not by this license.

@@ -1,0 +1,47 @@
+{
+  "name": "cpython-security-toolkit",
+  "version": "0.1.0",
+  "description": "Security invariant analysis for CPython's standard library — finding semantic security flaws that generic SAST tools, fuzzers, and sanitizers do not model well.",
+  "author": "ReviewToolkits",
+  "repository": "https://github.com/ReviewToolkits/cpython-security-toolkit",
+  "commands": [
+    {
+      "name": "scan",
+      "description": "Full security scan using all four engines (archive, protocol, resource, audit)",
+      "file": "plugins/cpython-security-toolkit/commands/scan.md"
+    },
+    {
+      "name": "archive",
+      "description": "Archive extraction boundary analysis — tarfile, zipfile, shutil",
+      "file": "plugins/cpython-security-toolkit/commands/archive.md"
+    },
+    {
+      "name": "protocol",
+      "description": "Protocol validation coverage analysis — incomplete-fix detection",
+      "file": "plugins/cpython-security-toolkit/commands/protocol.md"
+    },
+    {
+      "name": "resource",
+      "description": "Resource amplification analysis — decompression bounds, algorithmic complexity",
+      "file": "plugins/cpython-security-toolkit/commands/resource.md"
+    },
+    {
+      "name": "audit",
+      "description": "Audit hook coverage analysis — sys.audit() gaps, command injection",
+      "file": "plugins/cpython-security-toolkit/commands/audit.md"
+    },
+    {
+      "name": "reproduce",
+      "description": "Generate and validate a reproducer for a specific finding ID",
+      "file": "plugins/cpython-security-toolkit/commands/reproduce.md"
+    }
+  ],
+  "scripts_dir": "plugins/cpython-security-toolkit/scripts",
+  "corpus_dir": "plugins/cpython-security-toolkit/corpus",
+  "documentation": {
+    "security_model": "SECURITY_MODEL.md",
+    "corpus": "CORPUS.md",
+    "working_with_maintainers": "WORKING_WITH_MAINTAINERS.md",
+    "design": "cpython-security-toolkit-design.md"
+  }
+}
