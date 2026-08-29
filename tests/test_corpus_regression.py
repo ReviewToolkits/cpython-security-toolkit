@@ -32,59 +32,96 @@ def load_module_from_path(path: Path):
     return mod
 
 
+def check_syntax(script: Path) -> bool:
+    """Return True if script parses without errors."""
+    result = subprocess.run(
+        [sys.executable, "-c", f"import ast; ast.parse(open(r'{script}').read())"],
+        capture_output=True, text=True
+    )
+    return result.returncode == 0, result.stderr
+
+
+def get_lib_dir() -> Path:
+    """Return the stdlib Lib/ directory."""
+    import tarfile
+    import inspect
+    return Path(inspect.getfile(tarfile)).parent
+
+
 # ── Archive domain ────────────────────────────────────────────────────────────
 
 class TestArchiveCorpus:
     """Corpus regression tests for archive extraction boundary invariant."""
 
-    def test_arc_005_realpath_overflow_positive(self):
-        """
-        ARC-005 (CVE-2025-4517 class): the positive fixture must correctly
-        detect whether boundary check occurs before or after path resolution.
-        """
-        fixture_path = CORPUS_DIR / "archive" / "positive" / "arc_005_realpath_overflow.py"
-        assert fixture_path.exists(), f"Corpus fixture missing: {fixture_path}"
-
-        mod = load_module_from_path(fixture_path)
-        # The fixture creates the crafted archive and tests extraction
-        # We are testing that the fixture itself runs without errors
-        # The actual detection is done by the scan_traversal.py engine
+    def test_arc_005_fixture_loads(self):
+        """ARC-005 positive fixture must load and expose expected functions."""
+        fixture = CORPUS_DIR / "archive" / "positive" / "arc_005_realpath_overflow.py"
+        assert fixture.exists(), f"Missing: {fixture}"
+        mod = load_module_from_path(fixture)
         assert hasattr(mod, "make_traversal_archive")
         assert hasattr(mod, "test_extraction_boundary")
-        print(f"ARC-005 fixture loaded successfully")
+        print("ARC-005 fixture: OK")
 
-    def test_traversal_detector_runs(self):
-        """scan_traversal.py must run without errors on a minimal input."""
-        script = SCRIPTS_DIR / "scan_traversal.py"
-        assert script.exists(), f"Script missing: {script}"
+    def test_arc_001_fixture_loads(self):
+        """ARC-001 positive fixture must load and expose expected functions."""
+        fixture = CORPUS_DIR / "archive" / "positive" / "arc_001_symlink_traversal.py"
+        assert fixture.exists(), f"Missing: {fixture}"
+        mod = load_module_from_path(fixture)
+        assert hasattr(mod, "make_symlink_escape_tar")
+        assert hasattr(mod, "test_symlink_boundary")
+        print("ARC-001 fixture: OK")
 
-        # Run against the stdlib if available, otherwise just check syntax
+    def test_arc_001_fixture_runs(self):
+        """ARC-001 fixture must run without errors."""
+        fixture = CORPUS_DIR / "archive" / "positive" / "arc_001_symlink_traversal.py"
         result = subprocess.run(
-            [sys.executable, "-c",
-             f"import ast; ast.parse(open(r'{script}').read())"],
-            capture_output=True, text=True
+            [sys.executable, str(fixture)],
+            capture_output=True, text=True, timeout=15
         )
-        assert result.returncode == 0, f"Script syntax error: {result.stderr}"
+        assert result.returncode == 0, f"Fixture crashed: {result.stderr}"
+        print(f"ARC-001 output: {result.stdout.strip()}")
+
+    def test_scan_traversal_syntax(self):
+        """scan_traversal.py must parse without errors."""
+        script = SCRIPTS_DIR / "scan_traversal.py"
+        assert script.exists(), f"Missing: {script}"
+        ok, err = check_syntax(script)
+        assert ok, f"Syntax error: {err}"
         print("scan_traversal.py: syntax OK")
 
-    def test_traversal_detector_on_stdlib(self):
-        """If CPython stdlib is available, run the detector and check it produces output."""
-        import tarfile
-        import inspect
-        tarfile_path = Path(inspect.getfile(tarfile))
-        lib_dir = tarfile_path.parent
-
+    def test_scan_traversal_on_stdlib(self):
+        """scan_traversal.py must run on stdlib and produce JSON."""
+        import json
         script = SCRIPTS_DIR / "scan_traversal.py"
         result = subprocess.run(
-            [sys.executable, str(script), str(lib_dir)],
+            [sys.executable, str(script), str(get_lib_dir())],
             capture_output=True, text=True, timeout=60
         )
-        # Script should exit 0 and produce JSON
         assert result.returncode == 0, f"Script failed: {result.stderr}"
-        import json
         findings = json.loads(result.stdout)
-        assert isinstance(findings, list), "Output should be a JSON list"
-        print(f"scan_traversal.py on stdlib: {len(findings)} candidate(s)")
+        assert isinstance(findings, list)
+        print(f"scan_traversal.py: {len(findings)} candidate(s)")
+
+    def test_scan_symlink_syntax(self):
+        """scan_symlink.py must parse without errors."""
+        script = SCRIPTS_DIR / "scan_symlink.py"
+        assert script.exists(), f"Missing: {script}"
+        ok, err = check_syntax(script)
+        assert ok, f"Syntax error: {err}"
+        print("scan_symlink.py: syntax OK")
+
+    def test_scan_symlink_on_stdlib(self):
+        """scan_symlink.py must run on stdlib and produce JSON."""
+        import json
+        script = SCRIPTS_DIR / "scan_symlink.py"
+        result = subprocess.run(
+            [sys.executable, str(script), str(get_lib_dir())],
+            capture_output=True, text=True, timeout=60
+        )
+        assert result.returncode == 0, f"Script failed: {result.stderr}"
+        findings = json.loads(result.stdout)
+        assert isinstance(findings, list)
+        print(f"scan_symlink.py: {len(findings)} candidate(s)")
 
 
 # ── Protocol domain ───────────────────────────────────────────────────────────
@@ -92,53 +129,48 @@ class TestArchiveCorpus:
 class TestProtocolCorpus:
     """Corpus regression tests for validation coverage invariant."""
 
-    def test_pro_002_morsel_update_fixture(self):
-        """
-        PRO-002 (CVE-2026-3644 class): run the positive fixture against the
-        current interpreter's http.cookies to determine if the gap exists.
-        """
-        fixture_path = CORPUS_DIR / "protocol" / "positive" / "pro_002_morsel_update_bypass.py"
-        assert fixture_path.exists(), f"Corpus fixture missing: {fixture_path}"
-
+    def test_pro_002_fixture_runs(self):
+        """PRO-002 fixture must run and produce output."""
+        fixture = CORPUS_DIR / "protocol" / "positive" / "pro_002_morsel_update_bypass.py"
+        assert fixture.exists(), f"Missing: {fixture}"
         result = subprocess.run(
-            [sys.executable, str(fixture_path)],
+            [sys.executable, str(fixture)],
             capture_output=True, text=True, timeout=10
         )
-        assert result.returncode == 0, f"Fixture failed: {result.stderr}"
-        print(f"PRO-002 fixture output: {result.stdout.strip()}")
-        # We don't assert POSITIVE or NEGATIVE here — we just confirm it runs
-        # The actual result depends on the Python version being tested
+        assert result.returncode == 0, f"Fixture crashed: {result.stderr}"
+        print(f"PRO-002 output: {result.stdout.strip()}")
 
-    def test_validation_coverage_detector_runs(self):
-        """scan_validation_coverage.py must run without errors."""
+    def test_scan_validation_coverage_syntax(self):
+        """scan_validation_coverage.py must parse without errors."""
         script = SCRIPTS_DIR / "scan_validation_coverage.py"
-        assert script.exists(), f"Script missing: {script}"
-
-        result = subprocess.run(
-            [sys.executable, "-c",
-             f"import ast; ast.parse(open(r'{script}').read())"],
-            capture_output=True, text=True
-        )
-        assert result.returncode == 0, f"Script syntax error: {result.stderr}"
+        assert script.exists(), f"Missing: {script}"
+        ok, err = check_syntax(script)
+        assert ok, f"Syntax error: {err}"
         print("scan_validation_coverage.py: syntax OK")
 
-    def test_validation_coverage_on_stdlib(self):
-        """Run validation coverage detector on stdlib http.cookies."""
+    def test_scan_validation_coverage_on_stdlib(self):
+        """scan_validation_coverage.py must run on stdlib and produce JSON."""
+        import json
         import http.cookies
         import inspect
-        cookies_path = Path(inspect.getfile(http.cookies))
-        lib_dir = cookies_path.parent.parent
-
+        lib_dir = Path(inspect.getfile(http.cookies)).parent.parent
         script = SCRIPTS_DIR / "scan_validation_coverage.py"
         result = subprocess.run(
             [sys.executable, str(script), str(lib_dir)],
             capture_output=True, text=True, timeout=60
         )
         assert result.returncode == 0, f"Script failed: {result.stderr}"
-        import json
         findings = json.loads(result.stdout)
         assert isinstance(findings, list)
-        print(f"scan_validation_coverage.py on stdlib: {len(findings)} candidate(s)")
+        print(f"scan_validation_coverage.py: {len(findings)} candidate(s)")
+
+    def test_scan_incomplete_fix_syntax(self):
+        """scan_incomplete_fix.py must parse without errors."""
+        script = SCRIPTS_DIR / "scan_incomplete_fix.py"
+        assert script.exists(), f"Missing: {script}"
+        ok, err = check_syntax(script)
+        assert ok, f"Syntax error: {err}"
+        print("scan_incomplete_fix.py: syntax OK")
 
 
 # ── Resource domain ───────────────────────────────────────────────────────────
@@ -146,35 +178,85 @@ class TestProtocolCorpus:
 class TestResourceCorpus:
     """Corpus regression tests for resource amplification invariant."""
 
-    def test_decompression_bounds_detector_runs(self):
-        """scan_decompression_bounds.py must run without errors."""
-        script = SCRIPTS_DIR / "scan_decompression_bounds.py"
-        assert script.exists(), f"Script missing: {script}"
-
+    def test_res_001_fixture_runs(self):
+        """RES-001 fixture must run and produce output."""
+        fixture = CORPUS_DIR / "resource" / "positive" / "res_001_negative_offset.py"
+        assert fixture.exists(), f"Missing: {fixture}"
         result = subprocess.run(
-            [sys.executable, "-c",
-             f"import ast; ast.parse(open(r'{script}').read())"],
-            capture_output=True, text=True
+            [sys.executable, str(fixture)],
+            capture_output=True, text=True, timeout=15
         )
-        assert result.returncode == 0, f"Script syntax error: {result.stderr}"
+        assert result.returncode == 0, f"Fixture crashed: {result.stderr}"
+        print(f"RES-001 output: {result.stdout.strip()}")
+
+    def test_scan_decompression_bounds_syntax(self):
+        """scan_decompression_bounds.py must parse without errors."""
+        script = SCRIPTS_DIR / "scan_decompression_bounds.py"
+        assert script.exists(), f"Missing: {script}"
+        ok, err = check_syntax(script)
+        assert ok, f"Syntax error: {err}"
         print("scan_decompression_bounds.py: syntax OK")
 
-    def test_decompression_bounds_on_stdlib(self):
-        """Run decompression bounds detector on stdlib zipfile."""
+    def test_scan_decompression_bounds_on_stdlib(self):
+        """scan_decompression_bounds.py must run on stdlib and produce JSON."""
+        import json
         import zipfile
         import inspect
         lib_dir = Path(inspect.getfile(zipfile)).parent
-
         script = SCRIPTS_DIR / "scan_decompression_bounds.py"
         result = subprocess.run(
             [sys.executable, str(script), str(lib_dir)],
             capture_output=True, text=True, timeout=60
         )
         assert result.returncode == 0, f"Script failed: {result.stderr}"
-        import json
         findings = json.loads(result.stdout)
         assert isinstance(findings, list)
-        print(f"scan_decompression_bounds.py on stdlib: {len(findings)} candidate(s)")
+        print(f"scan_decompression_bounds.py: {len(findings)} candidate(s)")
+
+    def test_scan_negative_offset_syntax(self):
+        """scan_negative_offset.py must parse without errors."""
+        script = SCRIPTS_DIR / "scan_negative_offset.py"
+        assert script.exists(), f"Missing: {script}"
+        ok, err = check_syntax(script)
+        assert ok, f"Syntax error: {err}"
+        print("scan_negative_offset.py: syntax OK")
+
+    def test_scan_negative_offset_on_stdlib(self):
+        """scan_negative_offset.py must run on stdlib and produce JSON."""
+        import json
+        script = SCRIPTS_DIR / "scan_negative_offset.py"
+        result = subprocess.run(
+            [sys.executable, str(script), str(get_lib_dir())],
+            capture_output=True, text=True, timeout=60
+        )
+        assert result.returncode == 0, f"Script failed: {result.stderr}"
+        findings = json.loads(result.stdout)
+        assert isinstance(findings, list)
+        print(f"scan_negative_offset.py: {len(findings)} candidate(s)")
+
+    def test_scan_cpu_complexity_syntax(self):
+        """scan_cpu_complexity.py must parse without errors."""
+        script = SCRIPTS_DIR / "scan_cpu_complexity.py"
+        assert script.exists(), f"Missing: {script}"
+        ok, err = check_syntax(script)
+        assert ok, f"Syntax error: {err}"
+        print("scan_cpu_complexity.py: syntax OK")
+
+    def test_scan_cpu_complexity_on_stdlib(self):
+        """scan_cpu_complexity.py must run on stdlib and produce JSON."""
+        import json
+        import http.cookies
+        import inspect
+        lib_dir = Path(inspect.getfile(http.cookies)).parent.parent
+        script = SCRIPTS_DIR / "scan_cpu_complexity.py"
+        result = subprocess.run(
+            [sys.executable, str(script), str(lib_dir)],
+            capture_output=True, text=True, timeout=60
+        )
+        assert result.returncode == 0, f"Script failed: {result.stderr}"
+        findings = json.loads(result.stdout)
+        assert isinstance(findings, list)
+        print(f"scan_cpu_complexity.py: {len(findings)} candidate(s)")
 
 
 # ── Audit domain ──────────────────────────────────────────────────────────────
@@ -182,35 +264,40 @@ class TestResourceCorpus:
 class TestAuditCorpus:
     """Corpus regression tests for audit hook coverage invariant."""
 
-    def test_audit_hooks_detector_runs(self):
-        """scan_audit_hooks.py must run without errors."""
-        script = SCRIPTS_DIR / "scan_audit_hooks.py"
-        assert script.exists(), f"Script missing: {script}"
-
+    def test_aud_001_fixture_runs(self):
+        """AUD-001 fixture must run and report audit hook results."""
+        fixture = CORPUS_DIR / "audit" / "positive" / "aud_001_open_code_bypass.py"
+        assert fixture.exists(), f"Missing: {fixture}"
         result = subprocess.run(
-            [sys.executable, "-c",
-             f"import ast; ast.parse(open(r'{script}').read())"],
-            capture_output=True, text=True
+            [sys.executable, str(fixture)],
+            capture_output=True, text=True, timeout=15
         )
-        assert result.returncode == 0, f"Script syntax error: {result.stderr}"
+        assert result.returncode == 0, f"Fixture crashed: {result.stderr}"
+        print(f"AUD-001 output: {result.stdout.strip()}")
+
+    def test_scan_audit_hooks_syntax(self):
+        """scan_audit_hooks.py must parse without errors."""
+        script = SCRIPTS_DIR / "scan_audit_hooks.py"
+        assert script.exists(), f"Missing: {script}"
+        ok, err = check_syntax(script)
+        assert ok, f"Syntax error: {err}"
         print("scan_audit_hooks.py: syntax OK")
 
-    def test_audit_hooks_on_stdlib(self):
-        """Run audit hook scanner on importlib."""
+    def test_scan_audit_hooks_on_stdlib(self):
+        """scan_audit_hooks.py must run on stdlib and produce JSON."""
+        import json
         import importlib._bootstrap_external
         import inspect
         lib_dir = Path(inspect.getfile(importlib._bootstrap_external)).parent.parent
-
         script = SCRIPTS_DIR / "scan_audit_hooks.py"
         result = subprocess.run(
             [sys.executable, str(script), str(lib_dir)],
             capture_output=True, text=True, timeout=60
         )
         assert result.returncode == 0, f"Script failed: {result.stderr}"
-        import json
         findings = json.loads(result.stdout)
         assert isinstance(findings, list)
-        print(f"scan_audit_hooks.py on stdlib: {len(findings)} candidate(s)")
+        print(f"scan_audit_hooks.py: {len(findings)} candidate(s)")
 
 
 # ── Reproducer engine ─────────────────────────────────────────────────────────
@@ -221,77 +308,57 @@ class TestReproducerEngine:
     def test_reproducer_engine_syntax(self):
         """reproducer_engine.py must parse without errors."""
         script = SCRIPTS_DIR / "reproducer_engine.py"
-        assert script.exists(), f"Script missing: {script}"
-
-        result = subprocess.run(
-            [sys.executable, "-c",
-             f"import ast; ast.parse(open(r'{script}').read())"],
-            capture_output=True, text=True
-        )
-        assert result.returncode == 0, f"Script syntax error: {result.stderr}"
+        assert script.exists(), f"Missing: {script}"
+        ok, err = check_syntax(script)
+        assert ok, f"Syntax error: {err}"
+        print("reproducer_engine.py: syntax OK")
 
     def test_reproducer_morsel_template(self):
-        """The Morsel update() reproducer template must run cleanly."""
-        import json
-        import tempfile
-
+        """Morsel update() reproducer template must run and return status."""
+        import json, tempfile
         script = SCRIPTS_DIR / "reproducer_engine.py"
         finding = {
-            "domain": "PRO",
-            "sub_invariant": "2a",
-            "module": "cookies.py",
-            "confidence": "SECURITY-CANDIDATE",
+            "domain": "PRO", "sub_invariant": "2a",
+            "module": "cookies.py", "confidence": "SECURITY-CANDIDATE",
         }
-
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(finding, f)
-            finding_path = f.name
-
+            tmp = f.name
         try:
             result = subprocess.run(
-                [sys.executable, str(script), finding_path],
+                [sys.executable, str(script), tmp],
                 capture_output=True, text=True, timeout=30
             )
             assert result.returncode == 0, f"Engine failed: {result.stderr}"
-            output = json.loads(result.stdout)
-            assert "reproducer_status" in output
-            assert "script" in output
-            print(f"Morsel reproducer status: {output['reproducer_status']}")
+            out = json.loads(result.stdout)
+            assert "reproducer_status" in out
+            assert "script" in out
+            print(f"Morsel reproducer: {out['reproducer_status']}")
         finally:
-            os.unlink(finding_path)
+            os.unlink(tmp)
 
     def test_reproducer_audit_template(self):
-        """The audit hook reproducer template must run cleanly."""
-        import json
-        import tempfile
-
+        """Audit hook reproducer template must run and return status."""
+        import json, tempfile
         script = SCRIPTS_DIR / "reproducer_engine.py"
         finding = {
-            "domain": "AUD",
-            "sub_invariant": "4a",
-            "module": "_bootstrap_external.py",
-            "confidence": "SECURITY-CANDIDATE",
+            "domain": "AUD", "sub_invariant": "4a",
+            "module": "_bootstrap_external.py", "confidence": "SECURITY-CANDIDATE",
         }
-
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(finding, f)
-            finding_path = f.name
-
+            tmp = f.name
         try:
             result = subprocess.run(
-                [sys.executable, str(script), finding_path],
+                [sys.executable, str(script), tmp],
                 capture_output=True, text=True, timeout=30
             )
             assert result.returncode == 0, f"Engine failed: {result.stderr}"
-            output = json.loads(result.stdout)
-            assert "reproducer_status" in output
-            print(f"Audit reproducer status: {output['reproducer_status']}")
+            out = json.loads(result.stdout)
+            assert "reproducer_status" in out
+            print(f"Audit reproducer: {out['reproducer_status']}")
         finally:
-            os.unlink(finding_path)
+            os.unlink(tmp)
 
 
 # ── Standalone runner ─────────────────────────────────────────────────────────
@@ -316,7 +383,7 @@ def run_all_tests():
         print(f"  {cls.__name__}")
         print(f"{'='*60}")
 
-        for method_name in dir(instance):
+        for method_name in sorted(dir(instance)):
             if not method_name.startswith("test_"):
                 continue
             method = getattr(instance, method_name)
@@ -335,7 +402,7 @@ def run_all_tests():
                 errors.append(f"{cls.__name__}.{method_name}: {type(e).__name__}: {e}")
 
     print(f"\n{'='*60}")
-    print(f"Corpus regression summary: {passed} passed, {failed} failed")
+    print(f"Corpus regression: {passed} passed, {failed} failed")
     if errors:
         print("\nFailures:")
         for e in errors:
