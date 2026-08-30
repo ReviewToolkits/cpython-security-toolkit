@@ -111,7 +111,7 @@ def check_validation_coverage(repo_dir: str, module_rel: str) -> list[dict]:
     uncovered = []
 
     for method in value_methods:
-        # Extract the method body (simple heuristic)
+        # Extract the method body conservatively; final coverage requires path tracing.
         pattern = rf"def {re.escape(method)}\s*\(.*?\).*?(?=\n    def |\nclass |\Z)"
         match = re.search(pattern, source, re.DOTALL)
         if not match:

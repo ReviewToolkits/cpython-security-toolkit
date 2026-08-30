@@ -504,3 +504,49 @@ class TestNegativeOffsetScript:
             assert f.get("sub_invariant") == "3c", \
                 f"Expected sub_invariant 3c, got {f.get('sub_invariant')}"
         print(f"scan_negative_offset.py (fixed): {len(findings)} candidate(s), all 3c")
+
+class TestPrecisionAndComparison:
+    """Tests for the failure modes found during the 2026 review."""
+
+    def test_decompression_does_not_flag_normal_readall(self, tmp_path):
+        script = SCRIPTS_DIR / "scan_decompression_bounds.py"
+        sample = tmp_path / "sample.py"
+        sample.write_text("def readall(self):\n    return self._fileobj.readall()\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, str(script), str(tmp_path)], capture_output=True, text=True)
+        assert result.returncode == 0
+        assert '"confidence": "SECURITY-CANDIDATE"' not in result.stdout
+
+    def test_decompression_flags_unbounded_decompressor(self, tmp_path):
+        script = SCRIPTS_DIR / "scan_decompression_bounds.py"
+        sample = tmp_path / "zipfile" / "__init__.py"
+        sample.parent.mkdir()
+        sample.write_text("def read(self):\n    return self._decompressor.decompress(data)\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, str(script), str(tmp_path)], capture_output=True, text=True)
+        assert result.returncode == 0
+        assert "output bound" in result.stdout
+
+    def test_parse_compatibility_for_lazy_import(self, tmp_path):
+        script = SCRIPTS_DIR / "scan_traversal.py"
+        sample = tmp_path / "zipfile.py"
+        sample.write_text("lazy import pathlib\n\ndef extract(self):\n    return None\n", encoding="utf-8")
+        result = subprocess.run([sys.executable, str(script), str(tmp_path)], capture_output=True, text=True)
+        assert result.returncode == 0
+        assert "ANALYSIS-ERROR" not in result.stdout
+
+class TestBaselineComparison:
+    def test_compare_filters_unchanged_findings(self, tmp_path):
+        """A historical finding present in both trees is not a new finding."""
+        base = tmp_path / "base"; target = tmp_path / "target"
+        for root in (base, target):
+            (root / "Lib" / "zipfile").mkdir(parents=True)
+            (root / "Lib" / "zipfile" / "__init__.py").write_text(
+                "def read(self):\n    return self._decompressor.decompress(data)\n", encoding="utf-8"
+            )
+        result = subprocess.run(
+            [sys.executable, str(SCRIPTS_DIR / "scan_compare.py"), str(base), str(target), "--engines", "resource"],
+            capture_output=True, text=True, timeout=15,
+        )
+        assert result.returncode == 0
+        report = __import__("json").loads(result.stdout)
+        assert report["summary"]["new"] == 0
+        assert report["summary"]["unchanged"] >= 1

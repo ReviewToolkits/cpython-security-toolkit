@@ -63,7 +63,7 @@ A security invariant is a property of correct behavior that, if violated, consti
 
 **Sub-invariants:**
 
-- 4a. Any path that loads Python bytecode (`.py`, `.pyc`, `.pyo`) must use `io.open_code()` rather than `open()` or `builtins.open()`, so that `sys.audit("open", ...)` fires.
+- 4a. Any path that loads Python bytecode (`.py`, `.pyc`, `.pyo`) must use the code-opening policy (`io.open_code()` / the corresponding import machinery) where an audit hook must observe code loading. A generic `open` audit event is not treated as equivalent to the dedicated code-loading policy.
 - 4b. Shell-calling paths (`subprocess`, `os.system`, `webbrowser`, `os.popen`) that accept input derived from untrusted sources must validate that input at the point closest to shell invocation, after all transformation and substitution.
 - 4c. The `sys.audit()` event for `webbrowser.open` must receive the final URL — the URL as it will be passed to the browser — not the URL before template substitution.
 

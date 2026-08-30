@@ -51,6 +51,17 @@ claude --plugin-dir plugins/cpython-security-toolkit
 
 ---
 
+## Critical safety gate: compare against baseline
+
+A static scanner can recognize a historical vulnerability shape even after CPython has fixed it. Therefore a scan of a single checkout is **not** evidence that the issue is new. Use the comparison driver when investigating a proposed finding:
+
+```
+python3 plugins/cpython-security-toolkit/scripts/scan_compare.py \
+  /path/to/baseline-cpython /path/to/target-cpython
+```
+
+`NEW` findings are present only in the target tree. `UNCHANGED` findings were already detectable in the baseline and must not be presented as new vulnerabilities. `ANALYSIS-ERROR` means the engine could not analyze a file and must not be interpreted as clean.
+
 ## Quick Start
 
 Navigate to a local CPython clone, then:

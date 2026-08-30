@@ -64,3 +64,14 @@ Next step:         <action>
 ## Corpus anchors for this engine
 
 ARC-001 through ARC-009 (see CORPUS.md). The engine must re-detect the invariant class demonstrated by each corpus entry. Run with `corpus` option to confirm regression prevention.
+
+## Runtime differential gate
+
+Static archive findings should be followed by the safe differential harness:
+
+```
+python3 plugins/cpython-security-toolkit/scripts/differential_archive.py --json
+```
+
+For Windows-specific path cases, run the equivalent corpus on Windows. A POSIX
+result cannot prove Windows drive-letter or UNC safety.

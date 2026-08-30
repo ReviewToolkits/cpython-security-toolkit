@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0 — Precision and novelty gates
+
+- Added stable finding fingerprints and `scan_compare.py` to distinguish **NEW** findings from patterns already present in a baseline checkout.
+- Added `preflight.py` to record CPython checkout/branch/HEAD/upstream state before a research run.
+- Added CPython 3.16 `lazy import` parser compatibility and explicit `ANALYSIS-ERROR` handling instead of silently treating parse failures as clean.
+- Tightened decompression analysis to recognize explicit decompressor indirection and avoid generic `readall()` false positives.
+- Added class-level validation delegation tracking and `_has_control_character` recognition for incomplete-fix analysis.
+- Tightened negative-counter analysis to target the actual `while`-loop failure mode instead of benign `range(negative)` cases.
+- Added Windows path review aid and tar/zip differential runtime harness.
+- Reworked reproducer classification: only explicit `RESULT: VIOLATION` can produce `SECURITY`; static inspection alone cannot confirm a vulnerability.
+- Corrected audit-hook documentation so generic `open` events are not conflated with the dedicated code-opening policy.
+- Added regression tests for the observed false-positive and stale-main failure modes.
+
 ## [0.2.1] — 2026-08-30
 
 ### Fixed

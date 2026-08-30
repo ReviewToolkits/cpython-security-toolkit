@@ -1,162 +1,54 @@
+"""Conservative attacker-input complexity heuristics.
+
+A string method inside any loop is not automatically quadratic.  We require a
+reasonable data-flow signal: the function receives a string-like argument and
+the same value (or a value derived from it) participates in the loop. Regex
+warnings are candidates unless the pattern is actually applied to a parameter.
 """
-scan_cpu_complexity.py — Algorithmic complexity analysis.
-
-Invariant 3d: operations on attacker-controlled input must not exhibit
-super-linear worst-case complexity without explicit bounds.
-
-Primary targets:
-- Quadratic string operations in loops
-- Backtracking regex on untrusted input
-- Nested loops over the same attacker-controlled string
-
-Usage:
-    python3 scan_cpu_complexity.py <cpython-lib-dir>
-"""
-
-import ast
-import json
-import os
-import re
-import sys
+from __future__ import annotations
+import ast,json,os,re,sys
 from pathlib import Path
+from common import add_fingerprint,read_ast
+TARGET_MODULES=["http/cookies.py","email/_parseaddr.py","email/feedparser.py","email/headerregistry.py","http/client.py","urllib/parse.py"]
+STRING_OPS={"find","index","count","replace","split","startswith","endswith","strip","lstrip","rstrip"}
+DANGEROUS_REGEX=[r"\(\.\*\).*\+",r"\.\*.*\.\*",r"\(\w\+\)\+"]
 
-TARGET_MODULES = [
-    "http/cookies.py",
-    "email/_parseaddr.py",
-    "email/feedparser.py",
-    "email/headerregistry.py",
-    "http/client.py",
-    "urllib/parse.py",
-]
-
-# String operations that are O(n) per call — quadratic if in a loop
-QUADRATIC_STRING_OPS = {
-    "find", "index", "count", "replace", "split",
-    "startswith", "endswith", "strip", "lstrip", "rstrip",
-}
-
-# Regex patterns that may backtrack
-BACKTRACK_RISK_PATTERNS = [
-    r"\.\*\.\*",
-    r"\+\.\+",
-    r"\(\.\*\)\+",
-    r"\(\w\+\)\+",
-]
-
-
-class ComplexityAnalyzer(ast.NodeVisitor):
-    def __init__(self, source_lines):
-        self.source_lines = source_lines
-        self.findings = []
-        self._func = None
-        self._func_lineno = 0
-        self._loop_depth = 0
-
-    def visit_FunctionDef(self, node):
-        old_func, old_ln = self._func, self._func_lineno
-        self._func = node.name
-        self._func_lineno = node.lineno
-        self.generic_visit(node)
-        self._func, self._func_lineno = old_func, old_ln
-
-    visit_AsyncFunctionDef = visit_FunctionDef
-
-    def visit_For(self, node):
-        self._loop_depth += 1
-        self.generic_visit(node)
-        self._loop_depth -= 1
-
-    def visit_While(self, node):
-        self._loop_depth += 1
-        self.generic_visit(node)
-        self._loop_depth -= 1
-
-    def visit_Call(self, node):
-        if self._loop_depth >= 1:
-            name = ""
-            if isinstance(node.func, ast.Attribute):
-                name = node.func.attr
-            elif isinstance(node.func, ast.Name):
-                name = node.func.id
-
-            if name in QUADRATIC_STRING_OPS:
-                self.findings.append({
-                    "function": self._func,
-                    "lineno": node.lineno,
-                    "issue": "String operation '{}()' inside loop — potential O(n\u00b2) on attacker input".format(name),
-                    "sub_invariant": "3d",
-                    "confidence": "HARDENING",
-                    "evidence": (
-                        "'{}()' called at line {} inside a loop (depth {}). "
-                        "If the input is attacker-controlled, this is O(n\u00b2). "
-                        "Matches gh-136063 (quadratic email parsing) "
-                        "and gh-123067 (quadratic cookie parsing).".format(
-                            name, node.lineno, self._loop_depth
-                        )
-                    ),
-                    "corpus_ref": "RES-007 (gh-136063), RES-008 (gh-123067)",
-                })
-
-        self.generic_visit(node)
-
-    def visit_Constant(self, node):
-        if isinstance(node.value, str) and len(node.value) > 3:
-            for pattern in BACKTRACK_RISK_PATTERNS:
-                if re.search(pattern, node.value):
-                    self.findings.append({
-                        "function": self._func,
-                        "lineno": node.lineno,
-                        "issue": "Regex pattern with potential catastrophic backtracking",
-                        "sub_invariant": "3d",
-                        "confidence": "SECURITY-CANDIDATE",
-                        "evidence": (
-                            "Regex pattern at line {} contains nested quantifiers "
-                            "that may cause catastrophic backtracking on "
-                            "attacker-controlled input.".format(node.lineno)
-                        ),
-                        "corpus_ref": "RES-003 (CVE-2026-3276)",
-                    })
-        self.generic_visit(node)
-
+def scan_module(path):
+    tree,src,error=read_ast(path)
+    if error:return [{"domain":"RES","module":Path(path).name,"function":"<parse error>","lineno":0,"issue":"Scanner could not parse source","sub_invariant":"N/A","confidence":"ANALYSIS-ERROR","evidence":error,"corpus_ref":None,"invariant":"Invariant 3: Resource Amplification Bound"}]
+    out=[]
+    for fn in [n for n in ast.walk(tree) if isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef))]:
+        params={a.arg for a in fn.args.args}
+        stringish={p for p in params if p.lower() in {"s","text","data","value","header","url","name","input","line","value"}}
+        for loop in [n for n in ast.walk(fn) if isinstance(n,(ast.For,ast.While))]:
+            for c in ast.walk(loop):
+                if isinstance(c,ast.Call) and isinstance(c.func,ast.Attribute) and c.func.attr in STRING_OPS:
+                    recv=c.func.value
+                    if isinstance(recv,ast.Name) and recv.id in stringish:
+                        out.append(add_fingerprint({"domain":"RES","module":Path(path).name,"function":fn.name,"lineno":c.lineno,
+                            "issue":f"Potential super-linear string processing on attacker-derived parameter via {c.func.attr}()","sub_invariant":"3d","confidence":"HARDENING",
+                            "evidence":f"Parameter '{recv.id}' participates in {c.func.attr}() inside a loop. Static analysis cannot establish iteration/input coupling, so this is hardening guidance rather than a security finding.","corpus_ref":"RES-007, RES-008","invariant":"Invariant 3: Resource Amplification Bound"}))
+        for c in ast.walk(fn):
+            if isinstance(c,ast.Call) and isinstance(c.func,ast.Attribute) and c.func.attr in {"match","search","findall","split"}:
+                for arg in c.args:
+                    if isinstance(arg,ast.Name) and arg.id in stringish:
+                        # Inspect nearby regex literal only when available in the call.
+                        pattern=None
+                        if c.func.attr in {"match","search","findall","split"} and isinstance(c.func.value,ast.Name):
+                            pattern=None
+                        text=ast.unparse(c)
+                        if any(re.search(p,text) for p in DANGEROUS_REGEX):
+                            out.append(add_fingerprint({"domain":"RES","module":Path(path).name,"function":fn.name,"lineno":c.lineno,
+                                "issue":"Potential catastrophic regex backtracking on attacker-derived input","sub_invariant":"3d","confidence":"SECURITY-CANDIDATE",
+                                "evidence":f"Regex operation at line {c.lineno} consumes parameter '{arg.id}' and the expression contains a nested-quantifier pattern. Reproduce before escalation.","corpus_ref":"RES-003","invariant":"Invariant 3: Resource Amplification Bound"}))
+    return out
 
 def scan(lib_dir):
-    results = []
-    for module_path in TARGET_MODULES:
-        # Support both / and os.sep separators
-        full = os.path.join(lib_dir, module_path.replace("/", os.sep))
-        if not os.path.exists(full):
-            continue
-        try:
-            source = Path(full).read_text(encoding="utf-8")
-            tree = ast.parse(source)
-            lines = source.splitlines()
-        except (SyntaxError, OSError):
-            continue
-
-        analyzer = ComplexityAnalyzer(lines)
-        analyzer.visit(tree)
-
-        for f in analyzer.findings:
-            results.append({
-                "domain": "RES",
-                "module": Path(full).name,
-                "invariant": "Invariant 3: Resource Amplification Bound",
-                "function": f["function"],
-                "lineno": f["lineno"],
-                "issue": f["issue"],
-                "sub_invariant": f["sub_invariant"],
-                "confidence": f["confidence"],
-                "evidence": f["evidence"],
-                "corpus_ref": f["corpus_ref"],
-            })
-
-    return results
-
-
-if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: {} <cpython-lib-dir>".format(sys.argv[0]), file=sys.stderr)
-        sys.exit(1)
-    results = scan(sys.argv[1])
-    print(json.dumps(results, indent=2))
-    print("\nTotal: {}".format(len(results)), file=sys.stderr)
+    out=[]
+    for rel in TARGET_MODULES:
+        p=os.path.join(lib_dir,rel.replace("/",os.sep))
+        if os.path.exists(p):out.extend(scan_module(p))
+    return out
+if __name__=="__main__":
+    if len(sys.argv)<2:raise SystemExit(f"Usage: {sys.argv[0]} <cpython-lib-dir>")
+    r=scan(sys.argv[1]);print(json.dumps(r,indent=2));print(f"Total: {len(r)}",file=sys.stderr)

@@ -1,6 +1,6 @@
 {
   "name": "cpython-security-toolkit",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Security invariant analysis for CPython's standard library \u2014 finding semantic security flaws that generic SAST tools, fuzzers, and sanitizers do not model well.",
   "author": "ReviewToolkits",
   "repository": "https://github.com/ReviewToolkits/cpython-security-toolkit",

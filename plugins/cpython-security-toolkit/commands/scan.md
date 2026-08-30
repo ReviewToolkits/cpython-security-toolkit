@@ -89,3 +89,29 @@ Before doing anything with findings:
 2. Pre-triage any SECURITY findings with a trusted CPython developer (devdanzin is a good contact)
 3. Run reproducers yourself and confirm the behavior
 4. Then — and only then — consider contacting `security@python.org`
+
+## Required novelty check
+
+A single-tree scan may rediscover a historical pattern that is already fixed.
+For research claims, compare a known baseline against the target:
+
+```
+python3 plugins/cpython-security-toolkit/scripts/scan_compare.py <baseline> <target>
+```
+
+Only `NEW` findings are candidates for a new regression. `UNCHANGED` findings
+are historical/static matches and must not be reported as newly discovered.
+`ANALYSIS-ERROR` is an incomplete scan, not a clean result.
+
+## Preflight
+
+Before a research run, record the exact checkout state:
+
+```
+python3 plugins/cpython-security-toolkit/scripts/preflight.py /path/to/cpython
+```
+
+Do not call a finding new merely because a scanner fires on `main`. If the same
+fingerprint appears in the baseline, the comparison layer marks it `UNCHANGED`.
+If `upstream/main` is available, `head_matches_upstream_main` also makes it clear
+whether the target was already at upstream main when the scan was performed.
