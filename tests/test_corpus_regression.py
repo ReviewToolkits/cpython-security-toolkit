@@ -414,3 +414,93 @@ def run_all_tests():
 if __name__ == "__main__":
     success = run_all_tests()
     sys.exit(0 if success else 1)
+
+# ── Negative fixtures ─────────────────────────────────────────────────────────
+
+class TestNegativeFixtures:
+    """Negative corpus fixtures must run cleanly and produce NEGATIVE output."""
+
+    def _run_fixture(self, path: Path, timeout: int = 15) -> subprocess.CompletedProcess:
+        assert path.exists(), f"Missing negative fixture: {path}"
+        result = subprocess.run(
+            [sys.executable, str(path)],
+            capture_output=True, text=True, timeout=timeout,
+        )
+        assert result.returncode == 0, f"Fixture crashed: {result.stderr}"
+        return result
+
+    def test_arc_neg_001_safe_extraction(self):
+        """Negative: safe extraction correctly blocks symlink traversal."""
+        r = self._run_fixture(
+            CORPUS_DIR / "archive" / "negative" / "arc_neg_001_safe_extraction.py"
+        )
+        assert "NEGATIVE" in r.stdout, f"Expected NEGATIVE output, got: {r.stdout}"
+        print(f"arc_neg_001: {r.stdout.strip()}")
+
+    def test_pro_neg_001_setitem_validates(self):
+        """Negative: Morsel.__setitem__ correctly rejects control characters."""
+        r = self._run_fixture(
+            CORPUS_DIR / "protocol" / "negative" / "pro_neg_001_morsel_validates_all_paths.py"
+        )
+        assert "NEGATIVE" in r.stdout, f"Expected NEGATIVE output, got: {r.stdout}"
+        print(f"pro_neg_001: {r.stdout.strip()}")
+
+    def test_res_neg_001_bounded_decompression(self):
+        """Negative: bounded decompression correctly limits output."""
+        r = self._run_fixture(
+            CORPUS_DIR / "resource" / "negative" / "res_neg_001_bounded_decompression.py"
+        )
+        assert "NEGATIVE" in r.stdout, f"Expected NEGATIVE output, got: {r.stdout}"
+        print(f"res_neg_001: {r.stdout.strip()}")
+
+    def test_aud_neg_001_open_code_fires_hook(self):
+        """Negative: io.open_code() correctly fires sys.audit() hook."""
+        r = self._run_fixture(
+            CORPUS_DIR / "audit" / "negative" / "aud_neg_001_open_code_fires_hook.py"
+        )
+        assert "NEGATIVE" in r.stdout, f"Expected NEGATIVE output, got: {r.stdout}"
+        print(f"aud_neg_001: {r.stdout.strip()}")
+
+
+# ── scan_negative_offset (fixed script) ───────────────────────────────────────
+
+class TestNegativeOffsetScript:
+    """Tests for the corrected scan_negative_offset.py (was a copy of scan_cpu_complexity)."""
+
+    def test_scan_negative_offset_syntax(self):
+        """scan_negative_offset.py must parse without errors."""
+        script = SCRIPTS_DIR / "scan_negative_offset.py"
+        assert script.exists(), f"Missing: {script}"
+        ok, err = check_syntax(script)
+        assert ok, f"Syntax error: {err}"
+        print("scan_negative_offset.py (fixed): syntax OK")
+
+    def test_scan_negative_offset_correct_invariant(self):
+        """scan_negative_offset.py must target sub_invariant 3c, not 3d."""
+        import ast as _ast
+        script = SCRIPTS_DIR / "scan_negative_offset.py"
+        source = script.read_text()
+        # The fixed script should target 3c (negative offsets) not 3d (complexity)
+        assert "3c" in source, "Fixed script must reference sub_invariant 3c"
+        assert "CVE-2025-8194" in source, "Must reference the canonical CVE anchor"
+        # Must NOT be a copy of scan_cpu_complexity (which targets http/cookies, email)
+        assert "QUADRATIC_STRING_OPS" not in source, \
+            "scan_negative_offset must not contain QUADRATIC_STRING_OPS (wrong script)"
+        print("scan_negative_offset.py: correctly targets sub_invariant 3c")
+
+    def test_scan_negative_offset_on_stdlib(self):
+        """scan_negative_offset.py must run on stdlib and produce JSON."""
+        import json
+        script = SCRIPTS_DIR / "scan_negative_offset.py"
+        result = subprocess.run(
+            [sys.executable, str(script), str(get_lib_dir())],
+            capture_output=True, text=True, timeout=60,
+        )
+        assert result.returncode == 0, f"Script failed: {result.stderr}"
+        findings = json.loads(result.stdout)
+        assert isinstance(findings, list)
+        # All findings must be sub_invariant 3c
+        for f in findings:
+            assert f.get("sub_invariant") == "3c", \
+                f"Expected sub_invariant 3c, got {f.get('sub_invariant')}"
+        print(f"scan_negative_offset.py (fixed): {len(findings)} candidate(s), all 3c")
